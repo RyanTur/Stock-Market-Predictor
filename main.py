@@ -2,7 +2,7 @@ import yfinance as yf
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn import svm
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_score, recall_score
 from sklearn.preprocessing import StandardScaler
 import torch
 import torch.nn as nn
@@ -12,7 +12,7 @@ from sklearn.neighbors import KNeighborsClassifier
 
 spy = yf.Ticker('SPY')
 
-history = spy.history(period="12mo")
+history = spy.history(period="60mo")
 history = pd.DataFrame(history)
 
 history['Target'] = history['Close'].shift(-1) > history['Close']
@@ -35,7 +35,7 @@ svm_report = classification_report(y_test, svm_predictions, zero_division=1)
 
 print(f'SVM Accuracy: {acc:.4f}')
 print('Confusion Matrix:', svm_confusion)
-print('Report of SVM:', svm_report)
+print('Report of SVM:\n', svm_report)
 
 #MLP
 scaler = StandardScaler()
@@ -89,6 +89,13 @@ with torch.no_grad():
     predictions = mlp_model(X_test_tensor)
     predictions = predictions.round()
     accuracy = (predictions.eq(y_test_tensor).sum() / float(y_test_tensor.shape[0])).item()
+    predictions_np = predictions.view(-1).cpu().numpy()
+    y_test_np = y_test_tensor.view(-1).cpu().numpy()
+    mlp_precision = precision_score(y_test_np, predictions_np, average='macro')
+    mlp_recall = recall_score(y_test_np, predictions_np, average='macro')
+
+print(f'MLP Precision: {mlp_precision:.4f}')
+print(f'MLP Recall: {mlp_recall:.4f}')
 
 print(f'Accuracy of the MLP: {accuracy:.4f}')
 
@@ -127,6 +134,14 @@ with torch.no_grad():
     test_predictions = test_predictions.round()
     correct_preds = (test_predictions.view(-1).eq(y_test_tensor.view(-1))).sum()
     accuracy = correct_preds.float() / y_test_tensor.shape[0]
+    test_predictions_np = test_predictions.view(-1).cpu().numpy()
+    y_test_np = y_test_tensor.view(-1).cpu().numpy()
+
+    precision = precision_score(y_test_np, test_predictions_np, average='macro')
+    recall = recall_score(y_test_np, test_predictions_np, average='macro')
+
+    print(f'LSTM Precision: {precision:.4f}')
+    print(f'LSTM Recall: {recall:.4f}')
     print(f'Accuracy of the LSTM: {accuracy:.4f}')
 
 
@@ -143,7 +158,7 @@ knn_report = classification_report(y_test, knn_predictions, zero_division=1)
 
 print(f'KNN Accuracy: {knn_accuracy:.4f}')
 print(f'KNN Confusion Matrix: {knn_confusion}')
-print('KNN Report:', knn_report)
+print('KNN Report:\n', knn_report)
 
 
 latest_data = spy.history(period="1d")
@@ -172,5 +187,3 @@ print("Tomorrow's LSTM Prediction (Higher=1, Lower=0):", lstm_prediction)
 knn_prediction = knn.predict(latest_features_scaled)
 knn_prediction = knn_prediction.astype(int)
 print("Tomorrow's KNN Prediction (Higher=1, Lower=0):", knn_prediction)
-
-print(scaler.feature_names_in_)
