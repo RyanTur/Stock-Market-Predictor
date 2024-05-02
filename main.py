@@ -8,17 +8,29 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.neighbors import KNeighborsClassifier
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 spy = yf.Ticker('SPY')
 
-history = spy.history(period="60mo")
+history = spy.history(period="12mo")
 history = pd.DataFrame(history)
 
 history['Target'] = history['Close'].shift(-1) > history['Close']
 history.dropna(inplace=True)
 
+
+def plot_confusion_matrix(cm, title='Confusion Matrix', labels=['Negative', 'Positive']):
+    plt.figure(figsize=(6,5))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=labels, yticklabels=labels)
+    plt.title(title)
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.show()
+
 # print(history)
+
 
 X = history[['Open', 'Close']]
 y = history['Target']
@@ -26,12 +38,14 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 
 # SVM
 
-svm = svm.SVC(kernel='linear')
+svm = svm.SVC(kernel='linear', class_weight='balanced')
 svm.fit(X_train, y_train)
 svm_predictions = svm.predict(X_test)
 acc = accuracy_score(y_test, svm_predictions)
 svm_confusion = confusion_matrix(y_test, svm_predictions)
+plot_confusion_matrix(svm_confusion, title='SVM Confusion Matrix')
 svm_report = classification_report(y_test, svm_predictions, zero_division=1)
+
 
 print(f'SVM Accuracy: {acc:.4f}')
 print('Confusion Matrix:', svm_confusion)
@@ -86,18 +100,18 @@ for epoch in range(epochs):
 
 mlp_model.eval()
 with torch.no_grad():
-    predictions = mlp_model(X_test_tensor)
-    predictions = predictions.round()
-    accuracy = (predictions.eq(y_test_tensor).sum() / float(y_test_tensor.shape[0])).item()
-    predictions_np = predictions.view(-1).cpu().numpy()
+    mlp_predictions = mlp_model(X_test_tensor)
+    mlp_predictions = mlp_predictions.round()
+    accuracy = (mlp_predictions.eq(y_test_tensor).sum() / float(y_test_tensor.shape[0])).item()
+    mlp_predictions_np = mlp_predictions.view(-1).cpu().numpy()
     y_test_np = y_test_tensor.view(-1).cpu().numpy()
-    mlp_precision = precision_score(y_test_np, predictions_np, average='macro')
-    mlp_recall = recall_score(y_test_np, predictions_np, average='macro')
+    mlp_confusion = confusion_matrix(y_test_np, mlp_predictions_np)
+    mlp_report = classification_report(y_test_np, mlp_predictions_np, zero_division=1)
 
-print(f'MLP Precision: {mlp_precision:.4f}')
-print(f'MLP Recall: {mlp_recall:.4f}')
-
+plot_confusion_matrix(mlp_confusion, title='MLP Confusion Matrix')
 print(f'Accuracy of the MLP: {accuracy:.4f}')
+print(f'Report of MLP:\n', mlp_report)
+
 
 #LSTM
 
@@ -136,13 +150,12 @@ with torch.no_grad():
     accuracy = correct_preds.float() / y_test_tensor.shape[0]
     test_predictions_np = test_predictions.view(-1).cpu().numpy()
     y_test_np = y_test_tensor.view(-1).cpu().numpy()
+    lstm_confusion = confusion_matrix(y_test_np, test_predictions_np)
+    lstm_report = classification_report(y_test_np, test_predictions_np, zero_division=1)
 
-    precision = precision_score(y_test_np, test_predictions_np, average='macro')
-    recall = recall_score(y_test_np, test_predictions_np, average='macro')
-
-    print(f'LSTM Precision: {precision:.4f}')
-    print(f'LSTM Recall: {recall:.4f}')
+    plot_confusion_matrix(lstm_confusion, title='LSTM Confusion Matrix')
     print(f'Accuracy of the LSTM: {accuracy:.4f}')
+    print(f'Report of LSTM:\n', lstm_report)
 
 
 #KNN
@@ -154,6 +167,7 @@ knn_predictions = knn.predict(X_test_scaled)
 
 knn_accuracy = accuracy_score(y_test, knn_predictions)
 knn_confusion = confusion_matrix(y_test, knn_predictions)
+plot_confusion_matrix(knn_confusion, title='KNN Confusion Matrix')
 knn_report = classification_report(y_test, knn_predictions, zero_division=1)
 
 print(f'KNN Accuracy: {knn_accuracy:.4f}')
@@ -187,3 +201,38 @@ print("Tomorrow's LSTM Prediction (Higher=1, Lower=0):", lstm_prediction)
 knn_prediction = knn.predict(latest_features_scaled)
 knn_prediction = knn_prediction.astype(int)
 print("Tomorrow's KNN Prediction (Higher=1, Lower=0):", knn_prediction)
+
+
+test_results = X_test.copy()
+test_results['Actual_Close'] = y_test
+test_results['SVM_Predictions'] = svm_predictions
+test_results['MLP_Predictions'] = mlp_predictions.view(-1).cpu().numpy()
+test_results['LSTM_Predictions'] = test_predictions.view(-1).cpu().numpy()
+test_results['KNN_Predictions'] = knn_predictions
+
+plt.figure(figsize=(16, 8))
+plt.plot(test_results['Actual_Close'], label='Actual Close', color='gray', alpha=0.6)
+
+
+test_results = test_results.sort_index()
+
+plt.scatter(test_results.index[test_results['SVM_Predictions'] == 1],
+            test_results['Actual_Close'][test_results['SVM_Predictions'] == 1],
+            color='red', label='SVM Buy Signal', marker='^', alpha=0.7)
+plt.scatter(test_results.index[test_results['MLP_Predictions'] == 1],
+            test_results['Actual_Close'][test_results['MLP_Predictions'] == 1],
+            color='blue', label='MLP Buy Signal', marker='o', alpha=0.7)
+plt.scatter(test_results.index[test_results['LSTM_Predictions'] == 1],
+            test_results['Actual_Close'][test_results['LSTM_Predictions'] == 1],
+            color='green', label='LSTM Buy Signal', marker='x', alpha=0.7)
+plt.scatter(test_results.index[test_results['KNN_Predictions'] == 1],
+            test_results['Actual_Close'][test_results['KNN_Predictions'] == 1],
+            color='purple', label='KNN Buy Signal', marker='s', alpha=0.7)
+
+plt.title('Test Data: Stock Price and Model Predictions Over Time')
+plt.xlabel('Date')
+plt.ylabel('Stock Price')
+plt.legend()
+plt.show()
+
+
